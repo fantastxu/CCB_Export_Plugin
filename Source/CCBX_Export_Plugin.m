@@ -62,6 +62,9 @@
     //4.deal with xxxxxLayer.h file
     [self ProcessLayer_H_File:parsedDic];
     
+    //5.deal with xxxxxLayer.cpp file
+    [self ProcessLayer_CPP_File:parsedDic];
+    
     return [NSPropertyListSerialization dataFromPropertyList:doc format:NSPropertyListBinaryFormat_v1_0 errorDescription:NULL];
 }
 
@@ -216,14 +219,37 @@ protected:\n\
     
 }
 
+-(NSString*) GenerateUneditableStringStart:(NSString*) key
+{
+    NSString* commentstringstart = [NSString stringWithFormat:@"//<<<<<<......!Please do NOT edit/add codes below![%@]......>>>>>>\n", key];
+    return commentstringstart;
+}
+
+-(NSString*) GenerateUneditableStringEnd:(NSString*) key
+{
+     NSString* commentstringend = [NSString stringWithFormat:@"//<<<<<<......!Please do NOT edit/add codes above![%@]......>>>>>>\n", key];
+    return commentstringend;
+}
+
+-(NSString*) GenerateEditableStringStart:(NSString*) key
+{
+    NSString* commentstringstart = [NSString stringWithFormat:@"//<<<<<<......You CAN edit/add codes below.[%@]......>>>>>>\n", key];
+    return commentstringstart;
+}
+
+-(NSString*) GenerateEditableStringEnd:(NSString*) key
+{
+    NSString* commentstringend = [NSString stringWithFormat:@"//<<<<<<......The whole codes above will be commented if they are not needed anymore.[%@]......>>>>>>\n", key];
+    return commentstringend;
+}
+
 -(NSString*) GenerateNewLayer_H_FunctionsVars:(NSDictionary*)paramDic
 {
     NSString* returnstring = @"";
     
     BOOL has_output = NO;
-    NSString* commentstringstart = [NSString stringWithFormat:@"//<<<<<<......!Please do NOT change codes below![functions, vars declare start]......>>>>>>\n"];
-    NSString* commentstringend = [NSString stringWithFormat:@"//<<<<<<......!Please do NOT change codes above![functions, vars declare end]......>>>>>>\n"];
-    
+    NSString* commentstringstart = [self GenerateUneditableStringStart:@"functions, vars declare start"];
+    NSString* commentstringend = [self GenerateUneditableStringEnd:@"functions, vars declare end"];    
     NSArray* array = [paramDic objectForKey:@"Func"];
     if(array != nil && [array count]>0)
     {
@@ -308,7 +334,7 @@ public:\n\
 \t%@();\n\
 \tvirtual ~%@();\n\
 \n\
-\tstatic cocos2d::CCNode LoadCCNode(const char * pCCBFileName, const char * pCCNodeName = NULL, cocos2d::extension::CCNodeLoader * pCCNodeLoader = NULL);\n\
+\tstatic cocos2d::CCNode* LoadCCNode(const char * pCCBFileName, const char * pCCNodeName = NULL, cocos2d::extension::CCNodeLoader * pCCNodeLoader = NULL);\n\
 \n\
 \tvirtual cocos2d::SEL_MenuHandler onResolveCCBCCMenuItemSelector(cocos2d::CCObject * pTarget, cocos2d::CCString * pSelectorName);\n\
 \tvirtual cocos2d::extension::SEL_CCControlHandler onResolveCCBCCControlSelector(cocos2d::CCObject * pTarget, cocos2d::CCString * pSelectorName);\n\
@@ -325,7 +351,186 @@ public:\n\
 
 -(NSString*) GenerateNewLayer_CPP_File:(NSDictionary*)paramDic
 {
-    return nil;
+    NSString* returnstring = @"";
+    NSString* classname = [[paramDic objectForKey:@"File"] objectForKey:@"customClass"];
+    NSArray* ccbs = [paramDic objectForKey:@"Ccb"];
+    returnstring = [returnstring stringByAppendingString:[self CommonComment]];
+    
+    //#include
+    returnstring = [returnstring stringByAppendingFormat:@"#include \"%@.h\"\n\n", classname];
+    
+    //include header for loader
+    returnstring = [returnstring stringByAppendingString:[self GenerateEditableStringStart:@"include start"]];
+    if(ccbs != nil && [ccbs count] > 0)
+    {
+        for(int i=0; i<[ccbs count]; i++)
+        {
+            NSString* ccbname = [[ccbs objectAtIndex:i] objectForKey:@"ccbName"];
+            returnstring = [returnstring stringByAppendingFormat:@"#include \"%@LayerLoader.h\"\n", ccbname];
+        }
+    }
+    
+    returnstring = [returnstring stringByAppendingString:[self GenerateEditableStringEnd:@"include end"]];
+    
+    //USING_XXXXX
+    returnstring = [returnstring stringByAppendingString:@"USING_NS_CC;\nUSING_NS_CC_EXT;\n\n"];
+    
+    //class construction function
+    returnstring = [returnstring stringByAppendingFormat:@"%@::%@()\n{\n",classname,classname];
+    NSArray* vars = [paramDic objectForKey:@"Var"];
+    if(vars != nil && [vars count]>0)
+    {
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringStart:@"Vars init start"]];
+        for(int i=0; i<[vars count]; i++)
+        {
+            returnstring = [returnstring stringByAppendingFormat:@"\t%@ = NULL;\n", [[vars objectAtIndex:i] objectForKey:@"varName"]];
+        }
+            
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringEnd:@"Vars init end"]];
+    }
+    returnstring = [returnstring stringByAppendingString:@"}\n\n"];
+    
+    //class destruction function
+    returnstring = [returnstring stringByAppendingFormat:@"%@::~%@()\n{\n",classname,classname];
+    if(vars != nil && [vars count]>0)
+    {
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringStart:@"Vars release start"]];
+        for(int i=0; i<[vars count]; i++)
+        {
+            returnstring = [returnstring stringByAppendingFormat:@"\tCC_SAFE_RELEASE(%@);\n", [[vars objectAtIndex:i] objectForKey:@"varName"]];
+        }
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringEnd:@"Vars release end"]];
+    }
+    returnstring = [returnstring stringByAppendingString:@"}\n\n"];
+    
+    //LoadCCNode function
+    returnstring = [returnstring stringByAppendingFormat:@"\
+static cocos2d::CCNode* %@::LoadCCNode(const char * pCCBFileName, const char * pCCNodeName = NULL, cocos2d::extension::CCNodeLoader * pCCNodeLoader = NULL)\n\
+{\n\
+\t/* Create an autorelease CCNodeLoaderLibrary. */\n\
+\tCCNodeLoaderLibrary * ccNodeLoaderLibrary = CCNodeLoaderLibrary::newDefaultCCNodeLoaderLibrary();\n" ,classname];
+        
+    
+    if(ccbs != nil)
+    {
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringStart:@"ccb register start"]];
+        for(int i=0; i<[ccbs count]; i++)
+        {
+            NSString* ccbname = [[ccbs objectAtIndex:i] objectForKey:@"ccbName"];
+            returnstring = [returnstring stringByAppendingFormat:@"\tccNodeLoaderLibrary->registerCCNodeLoader(\"%@Layer\", %@LayerLoader::loader());\n",ccbname,ccbname];
+        }
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringEnd:@"ccb register end"]];
+    }
+    returnstring = [returnstring stringByAppendingString:@"\
+\tif(pCCNodeName != NULL && pCCNodeLoader != NULL) {\n\
+\t\tccNodeLoaderLibrary->registerCCNodeLoader(pCCNodeName, pCCNodeLoader);\n\
+\t}\n\n\
+\t/* Create an autorelease CCBReader. */\n\
+\tcocos2d::extension::CCBReader * ccbReader = new cocos2d::extension::CCBReader(ccNodeLoaderLibrary);\n\
+\tccbReader->autorelease();\n\n\
+\t/* Read a ccbi file. */\n\
+\tCCNode * node = ccbReader->readNodeGraphFromFile(pCCBFileName, this);\n\n\
+\treturn node;\n\n\
+}\n\n"];
+    
+    //onNodeLoaded function
+    //returnstring = [returnstring stringByAppendingString:[self GenerateEditableStringStart:@"onNodeLoaded start"]];
+    returnstring = [returnstring stringByAppendingFormat:@"\
+void %@::onNodeLoaded(cocos2d::CCNode * pNode,  cocos2d::extension::CCNodeLoader * pNodeLoader) \n{\n\
+}\n\n", classname];
+    //returnstring = [returnstring stringByAppendingString:[self GenerateEditableStringStart:@"onNodeLoaded end"]];
+    
+    NSArray* funcs = [paramDic objectForKey:@"Func"];
+    //onResolveCCBCCMenuItemSelector
+    returnstring = [returnstring stringByAppendingFormat:@"\
+SEL_MenuHandler %@::onResolveCCBCCMenuItemSelector(CCObject * pTarget, CCString * pSelectorName) \n{\n", classname];
+    
+    if(funcs != nil && [funcs count]>0)
+    {
+        BOOL isCommented = NO;
+        for(int i=0; i<[funcs count]; i++)
+        {
+            NSString* typename = [[funcs objectAtIndex:i] objectForKey:@"type"];
+            NSString* functionname = [[funcs objectAtIndex:i] objectForKey:@"funcName"];
+            if([typename isEqualToString:@"Block"])
+            {
+                if(isCommented == NO)
+                {
+                    returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringStart:@"MenuItem glues start"]];
+                    isCommented = YES;
+                }
+                
+                returnstring = [returnstring stringByAppendingFormat:@"\tCCB_SELECTORRESOLVER_CCMENUITEM_GLUE(this, \"%@\", %@::%@)\n", functionname, classname, functionname];
+            }
+        }
+        
+        if(isCommented == YES)
+            returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringEnd:@"MenuItem glues end"]];
+    }
+
+    returnstring = [returnstring stringByAppendingString:@"\treturn NULL;\n}\n\n"];
+        
+    //onResolveCCBCCControlSelector
+    returnstring = [returnstring stringByAppendingFormat:@"\
+SEL_CCControlHandler %@::onResolveCCBCCControlSelector(CCObject * pTarget, CCString * pSelectorName) \n{\n", classname];
+
+    if(funcs != nil && [funcs count]>0)
+    {
+        BOOL isCommented = NO;
+        for(int i=0; i<[funcs count]; i++)
+        {
+            NSString* typename = [[funcs objectAtIndex:i] objectForKey:@"type"];
+            NSString* functionname = [[funcs objectAtIndex:i] objectForKey:@"funcName"];
+            if([typename isEqualToString:@"BlockCCControl"])
+            {
+                if(isCommented == NO)
+                {
+                    returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringStart:@"Control glues start"]];
+                    isCommented = YES;
+                }
+                
+                returnstring = [returnstring stringByAppendingFormat:@"\tCCB_SELECTORRESOLVER_CCCONTROL_GLUE(this, \"%@\", %@::%@);\n", functionname, classname, functionname];
+            }
+        }
+
+        if(isCommented == YES)
+            returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringEnd:@"Control glues end"]];
+        
+    }
+
+    returnstring = [returnstring stringByAppendingString:@"\treturn NULL;\n}\n\n"];
+
+    //onAssignCCBMemberVariable
+    returnstring = [returnstring stringByAppendingFormat:@"\
+bool %@::onAssignCCBMemberVariable(CCObject * pTarget, CCString * pMemberVariableName, CCNode * pNode) \n{\n", classname];
+    if(vars != nil && [vars count]>0)
+    {
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringStart:@"Var glues start"]];
+        for(int i=0; i<[vars count]; i++)
+        {
+            NSString* varname = [[vars objectAtIndex:i] objectForKey:@"varName"];
+            NSString* vartype = [[vars objectAtIndex:i] objectForKey:@"baseClass"];
+            returnstring = [returnstring stringByAppendingFormat:@"\tCCB_MEMBERVARIABLEASSIGNER_GLUE(this, \"%@\", %@ *, this->%@);\n", varname, vartype, varname];
+        }
+        returnstring = [returnstring stringByAppendingString:[self GenerateUneditableStringEnd:@"Var glues end"]];
+    }
+    
+    returnstring = [returnstring stringByAppendingString:@"}\n\n"];
+    
+    //MenuItem, CCControl function body
+    if(funcs != nil && [funcs count] > 0)
+    {
+        for(int i=0; i<[funcs count]; i++)
+        {
+            NSString* functionname = [[funcs objectAtIndex:i] objectForKey:@"funcName"];
+            NSString* localstart = [NSString stringWithFormat:@"%@ body start", functionname];
+            NSString* localend = [NSString stringWithFormat:@"%@ body end", functionname];
+            returnstring = [returnstring stringByAppendingString:[self GenerateEditableStringStart:localstart]];
+            returnstring = [returnstring stringByAppendingFormat:@"void %@::%@(CCObject * pSender, cocos2d::extension::CCControlEvent pCCControlEvent) \n{\n\n}%@\n\n", classname, functionname,[self GenerateEditableStringEnd:localend]];
+        }        
+    }
+
+    return returnstring;
 }
 
 -(NSString*) CommonComment
@@ -361,8 +566,6 @@ public:\n\
     NSFileManager* filemanager = [NSFileManager defaultManager];
     NSString* exportfile = [NSString stringWithFormat:@"%@/CCBXExport/%@Loader.h", NSHomeDirectory(), [[paramDic objectForKey:@"File"] objectForKey:@"customClass"]];
     
-    //create CCBExport folder if it is not exist.
-    
     NSError* error;
     if(![filemanager fileExistsAtPath:exportfile])
     {
@@ -379,8 +582,6 @@ public:\n\
     NSFileManager* filemanager = [NSFileManager defaultManager];
     NSString* exportfile = [NSString stringWithFormat:@"%@/CCBXExport/%@.h", NSHomeDirectory(), [[paramDic objectForKey:@"File"] objectForKey:@"customClass"]];
     
-    //create CCBExport folder if it is not exist.
-    
     NSError* error;
     if(![filemanager fileExistsAtPath:exportfile])
     {
@@ -393,6 +594,16 @@ public:\n\
 
 -(BOOL) ProcessLayer_CPP_File:(NSDictionary*)paramDic
 {
+    NSFileManager* filemanager = [NSFileManager defaultManager];
+    NSString* exportfile = [NSString stringWithFormat:@"%@/CCBXExport/%@.cpp", NSHomeDirectory(), [[paramDic objectForKey:@"File"] objectForKey:@"customClass"]];
+    
+    NSError* error;
+    if(![filemanager fileExistsAtPath:exportfile])
+    {
+        NSString* filecontent = [self GenerateNewLayer_CPP_File:paramDic];
+        [filecontent writeToFile:exportfile atomically:NO encoding:NSUTF8StringEncoding error:&error];
+    }
+    
     return YES;
 }
 
